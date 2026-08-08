@@ -64,14 +64,13 @@ message DeviceRemovedEventProto {
 }
 
 message ScenarioAddedEventProto {
-  string id = 1;
-  string name = 2;
-  repeated ScenarioConditionProto conditions = 3;
-  repeated DeviceActionProto actions = 4;
+  string name = 1;
+  repeated ScenarioConditionProto condition = 2;
+  repeated DeviceActionProto action = 3;
 }
 
 message ScenarioRemovedEventProto {
-  string id = 1;
+  string name = 1;
 }
 
 message HubEventProto {
