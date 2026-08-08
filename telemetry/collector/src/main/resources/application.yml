@@ -1,0 +1,8 @@
+server:
+  port: 8080
+
+collector:
+  kafka:
+    bootstrap-servers: localhost:9092
+    sensors-topic: telemetry.sensors.v1
+    hubs-topic: telemetry.hubs.v1
