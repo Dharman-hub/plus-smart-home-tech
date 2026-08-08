@@ -1,13 +1,10 @@
 package ru.yandex.practicum.collector.mapper;
 
+import com.google.protobuf.Timestamp;
 import org.springframework.stereotype.Component;
-import ru.yandex.practicum.collector.model.hub.DeviceAction;
-import ru.yandex.practicum.collector.model.hub.DeviceAddedEvent;
-import ru.yandex.practicum.collector.model.hub.DeviceRemovedEvent;
-import ru.yandex.practicum.collector.model.hub.HubEvent;
-import ru.yandex.practicum.collector.model.hub.ScenarioAddedEvent;
-import ru.yandex.practicum.collector.model.hub.ScenarioCondition;
-import ru.yandex.practicum.collector.model.hub.ScenarioRemovedEvent;
+import ru.yandex.practicum.grpc.telemetry.event.DeviceActionProto;
+import ru.yandex.practicum.grpc.telemetry.event.HubEventProto;
+import ru.yandex.practicum.grpc.telemetry.event.ScenarioConditionProto;
 import ru.yandex.practicum.kafka.telemetry.event.ActionTypeAvro;
 import ru.yandex.practicum.kafka.telemetry.event.ConditionOperationAvro;
 import ru.yandex.practicum.kafka.telemetry.event.ConditionTypeAvro;
@@ -20,60 +17,55 @@ import ru.yandex.practicum.kafka.telemetry.event.ScenarioAddedEventAvro;
 import ru.yandex.practicum.kafka.telemetry.event.ScenarioConditionAvro;
 import ru.yandex.practicum.kafka.telemetry.event.ScenarioRemovedEventAvro;
 
+import java.time.Instant;
 import java.util.List;
 
 @Component
 public class HubEventMapper {
 
-    public HubEventAvro toAvro(HubEvent event) {
+    public HubEventAvro toAvro(HubEventProto event) {
         return HubEventAvro.newBuilder()
                 .setHubId(event.getHubId())
-                .setTimestamp(event.getTimestamp())
+                .setTimestamp(toInstant(event.getTimestamp()))
                 .setPayload(mapPayload(event))
                 .build();
     }
 
-    private Object mapPayload(HubEvent event) {
-        if (event instanceof DeviceAddedEvent deviceAddedEvent) {
-            return DeviceAddedEventAvro.newBuilder()
-                    .setId(deviceAddedEvent.getId())
+    private Object mapPayload(HubEventProto event) {
+        return switch (event.getPayloadCase()) {
+            case DEVICE_ADDED -> DeviceAddedEventAvro.newBuilder()
+                    .setId(event.getDeviceAdded().getId())
                     .setType(DeviceTypeAvro.valueOf(
-                            deviceAddedEvent.getDeviceType().name()
+                            event.getDeviceAdded().getType().name()
                     ))
                     .build();
-        }
 
-        if (event instanceof DeviceRemovedEvent deviceRemovedEvent) {
-            return DeviceRemovedEventAvro.newBuilder()
-                    .setId(deviceRemovedEvent.getId())
+            case DEVICE_REMOVED -> DeviceRemovedEventAvro.newBuilder()
+                    .setId(event.getDeviceRemoved().getId())
                     .build();
-        }
 
-        if (event instanceof ScenarioAddedEvent scenarioAddedEvent) {
-            return ScenarioAddedEventAvro.newBuilder()
-                    .setName(scenarioAddedEvent.getName())
+            case SCENARIO_ADDED -> ScenarioAddedEventAvro.newBuilder()
+                    .setName(event.getScenarioAdded().getName())
                     .setConditions(mapConditions(
-                            scenarioAddedEvent.getConditions()
+                            event.getScenarioAdded().getConditionList()
                     ))
                     .setActions(mapActions(
-                            scenarioAddedEvent.getActions()
+                            event.getScenarioAdded().getActionList()
                     ))
                     .build();
-        }
 
-        if (event instanceof ScenarioRemovedEvent scenarioRemovedEvent) {
-            return ScenarioRemovedEventAvro.newBuilder()
-                    .setName(scenarioRemovedEvent.getName())
+            case SCENARIO_REMOVED -> ScenarioRemovedEventAvro.newBuilder()
+                    .setName(event.getScenarioRemoved().getName())
                     .build();
-        }
 
-        throw new IllegalArgumentException(
-                "Unknown hub event type: " + event.getClass().getName()
-        );
+            case PAYLOAD_NOT_SET -> throw new IllegalArgumentException(
+                    "Hub event payload is not set"
+            );
+        };
     }
 
     private List<ScenarioConditionAvro> mapConditions(
-            List<ScenarioCondition> conditions) {
+            List<ScenarioConditionProto> conditions) {
 
         return conditions.stream()
                 .map(this::mapCondition)
@@ -81,7 +73,7 @@ public class HubEventMapper {
     }
 
     private ScenarioConditionAvro mapCondition(
-            ScenarioCondition condition) {
+            ScenarioConditionProto condition) {
 
         return ScenarioConditionAvro.newBuilder()
                 .setSensorId(condition.getSensorId())
@@ -91,25 +83,40 @@ public class HubEventMapper {
                 .setOperation(ConditionOperationAvro.valueOf(
                         condition.getOperation().name()
                 ))
-                .setValue(condition.getValue())
+                .setValue(mapConditionValue(condition))
                 .build();
     }
 
+    private Object mapConditionValue(ScenarioConditionProto condition) {
+        return switch (condition.getValueCase()) {
+            case BOOL_VALUE -> condition.getBoolValue();
+            case INT_VALUE -> condition.getIntValue();
+            case VALUE_NOT_SET -> null;
+        };
+    }
+
     private List<DeviceActionAvro> mapActions(
-            List<DeviceAction> actions) {
+            List<DeviceActionProto> actions) {
 
         return actions.stream()
                 .map(this::mapAction)
                 .toList();
     }
 
-    private DeviceActionAvro mapAction(DeviceAction action) {
+    private DeviceActionAvro mapAction(DeviceActionProto action) {
         return DeviceActionAvro.newBuilder()
                 .setSensorId(action.getSensorId())
                 .setType(ActionTypeAvro.valueOf(
                         action.getType().name()
                 ))
-                .setValue(action.getValue())
+                .setValue(action.hasValue() ? action.getValue() : null)
                 .build();
+    }
+
+    private Instant toInstant(Timestamp timestamp) {
+        return Instant.ofEpochSecond(
+                timestamp.getSeconds(),
+                timestamp.getNanos()
+        );
     }
 }
