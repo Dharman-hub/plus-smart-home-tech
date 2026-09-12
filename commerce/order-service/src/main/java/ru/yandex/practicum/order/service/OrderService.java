@@ -33,11 +33,36 @@ public class OrderService {
     @Transactional
     public OrderDto saveConfirmedOrder(CreateOrderRequest request,
                                        Map<Long, ProductDto> products) {
+        return saveOrder(
+                request,
+                products,
+                OrderStatus.CONFIRMED,
+                "Заказ подтверждён"
+        );
+    }
+
+    @Transactional
+    public OrderDto savePendingOrder(CreateOrderRequest request,
+                                     Map<Long, ProductDto> products,
+                                     String statusDetails) {
+        return saveOrder(
+                request,
+                products,
+                OrderStatus.PENDING_CONFIRMATION,
+                statusDetails
+        );
+    }
+
+    private OrderDto saveOrder(CreateOrderRequest request,
+                               Map<Long, ProductDto> products,
+                               OrderStatus status,
+                               String statusDetails) {
         Order order = new Order();
 
         order.setCustomerName(request.customerName());
         order.setCustomerEmail(request.customerEmail());
-        order.setStatus(OrderStatus.CONFIRMED);
+        order.setStatus(status);
+        order.setStatusDetails(statusDetails);
         order.setCreatedAt(LocalDateTime.now());
 
         BigDecimal totalPrice = BigDecimal.ZERO;
