@@ -9,12 +9,14 @@ import ru.yandex.practicum.order.entity.Order;
 import ru.yandex.practicum.order.entity.OrderItem;
 import ru.yandex.practicum.order.entity.OrderStatus;
 import ru.yandex.practicum.order.exception.NotFoundException;
+import ru.yandex.practicum.order.feign.ProductDto;
 import ru.yandex.practicum.order.mapper.OrderMapper;
 import ru.yandex.practicum.order.repository.OrderRepository;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class OrderService {
@@ -29,27 +31,55 @@ public class OrderService {
     }
 
     @Transactional
-    public OrderDto create(CreateOrderRequest request) {
+    public OrderDto saveConfirmedOrder(CreateOrderRequest request,
+                                       Map<Long, ProductDto> products) {
+        return saveOrder(
+                request,
+                products,
+                OrderStatus.CONFIRMED,
+                "Заказ подтверждён"
+        );
+    }
+
+    @Transactional
+    public OrderDto savePendingOrder(CreateOrderRequest request,
+                                     Map<Long, ProductDto> products,
+                                     String statusDetails) {
+        return saveOrder(
+                request,
+                products,
+                OrderStatus.PENDING_CONFIRMATION,
+                statusDetails
+        );
+    }
+
+    private OrderDto saveOrder(CreateOrderRequest request,
+                               Map<Long, ProductDto> products,
+                               OrderStatus status,
+                               String statusDetails) {
         Order order = new Order();
 
         order.setCustomerName(request.customerName());
         order.setCustomerEmail(request.customerEmail());
-        order.setStatus(OrderStatus.CREATED);
+        order.setStatus(status);
+        order.setStatusDetails(statusDetails);
         order.setCreatedAt(LocalDateTime.now());
 
         BigDecimal totalPrice = BigDecimal.ZERO;
 
         for (OrderItemRequest itemRequest : request.items()) {
+            ProductDto product = products.get(itemRequest.productId());
+
             OrderItem item = new OrderItem();
 
             item.setProductId(itemRequest.productId());
-            item.setProductName(itemRequest.productName());
+            item.setProductName(product.name());
             item.setQuantity(itemRequest.quantity());
-            item.setPrice(itemRequest.price());
+            item.setPrice(product.price());
 
             order.addItem(item);
 
-            BigDecimal itemTotal = itemRequest.price()
+            BigDecimal itemTotal = product.price()
                     .multiply(BigDecimal.valueOf(itemRequest.quantity()));
 
             totalPrice = totalPrice.add(itemTotal);
