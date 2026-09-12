@@ -7,13 +7,16 @@ import org.springframework.stereotype.Service;
 import ru.yandex.practicum.order.dto.CreateOrderRequest;
 import ru.yandex.practicum.order.dto.OrderDto;
 import ru.yandex.practicum.order.dto.OrderItemRequest;
+import ru.yandex.practicum.order.exception.InventoryServiceUnavailableException;
 import ru.yandex.practicum.order.exception.OrderProcessingException;
+import ru.yandex.practicum.order.exception.ProductServiceUnavailableException;
 import ru.yandex.practicum.order.feign.InventoryClient;
 import ru.yandex.practicum.order.feign.ProductClient;
 import ru.yandex.practicum.order.feign.ProductDto;
 import ru.yandex.practicum.order.feign.ReserveRequest;
 import ru.yandex.practicum.order.feign.ReserveResponse;
 
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -38,13 +41,39 @@ public class OrderOrchestrationService {
 
     public OrderDto create(CreateOrderRequest request) {
         Map<Long, Integer> quantities = groupQuantities(request);
-        Map<Long, ProductDto> products = loadProducts(quantities);
+
+        ProductLoadResult productResult = loadProducts(quantities);
+
+        if (productResult.degraded()) {
+            return orderService.savePendingOrder(
+                    request,
+                    productResult.products(),
+                    "Требуется ручная проверка: product-service временно недоступен"
+            );
+        }
+
         Map<Long, Integer> reservedProducts = new LinkedHashMap<>();
 
         try {
             reserveProducts(quantities, reservedProducts);
+        } catch (InventoryServiceUnavailableException e) {
+            releaseReservations(reservedProducts);
 
-            return orderService.saveConfirmedOrder(request, products);
+            return orderService.savePendingOrder(
+                    request,
+                    productResult.products(),
+                    "Требуется ручная проверка: резервирование товара не подтверждено"
+            );
+        } catch (RuntimeException e) {
+            releaseReservations(reservedProducts);
+            throw e;
+        }
+
+        try {
+            return orderService.saveConfirmedOrder(
+                    request,
+                    productResult.products()
+            );
         } catch (RuntimeException e) {
             releaseReservations(reservedProducts);
             throw e;
@@ -65,22 +94,41 @@ public class OrderOrchestrationService {
         return quantities;
     }
 
-    private Map<Long, ProductDto> loadProducts(Map<Long, Integer> quantities) {
+    private ProductLoadResult loadProducts(Map<Long, Integer> quantities) {
         Map<Long, ProductDto> products = new HashMap<>();
+        boolean degraded = false;
 
         for (Long productId : quantities.keySet()) {
-            ProductDto product = getProduct(productId);
+            try {
+                ProductDto product = getProduct(productId);
 
-            if (!Boolean.TRUE.equals(product.active())) {
-                throw new OrderProcessingException(
-                        "Товар с id " + productId + " снят с продажи"
+                if (!Boolean.TRUE.equals(product.active())) {
+                    throw new OrderProcessingException(
+                            "Товар с id " + productId + " снят с продажи"
+                    );
+                }
+
+                products.put(productId, product);
+            } catch (ProductServiceUnavailableException e) {
+                degraded = true;
+
+                products.put(
+                        productId,
+                        createPendingProduct(productId)
                 );
             }
-
-            products.put(productId, product);
         }
 
-        return products;
+        return new ProductLoadResult(products, degraded);
+    }
+
+    private ProductDto createPendingProduct(Long productId) {
+        return new ProductDto(
+                productId,
+                "Товар #" + productId + " (ожидает проверки)",
+                BigDecimal.ZERO,
+                null
+        );
     }
 
     private ProductDto getProduct(Long productId) {
@@ -93,9 +141,13 @@ public class OrderOrchestrationService {
                 );
             }
 
-            throw new OrderProcessingException(
-                    "Не удалось получить данные товара с id " + productId
-            );
+            if (e.status() >= 400 && e.status() < 500) {
+                throw new OrderProcessingException(
+                        "Не удалось использовать товар с id " + productId
+                );
+            }
+
+            throw e;
         }
     }
 
@@ -125,19 +177,25 @@ public class OrderOrchestrationService {
         } catch (FeignException e) {
             if (e.status() == 404) {
                 throw new OrderProcessingException(
-                        "Складская запись для товара с id " + productId + " не найдена"
+                        "Складская запись для товара с id "
+                                + productId + " не найдена"
                 );
             }
 
             if (e.status() == 409) {
                 throw new OrderProcessingException(
-                        "Недостаточно товара с id " + productId + " на складе"
+                        "Недостаточно товара с id "
+                                + productId + " на складе"
                 );
             }
 
-            throw new OrderProcessingException(
-                    "Не удалось зарезервировать товар с id " + productId
-            );
+            if (e.status() >= 400 && e.status() < 500) {
+                throw new OrderProcessingException(
+                        "Не удалось зарезервировать товар с id " + productId
+                );
+            }
+
+            throw e;
         }
     }
 
@@ -150,7 +208,7 @@ public class OrderOrchestrationService {
                                 entry.getValue()
                         )
                 );
-            } catch (FeignException e) {
+            } catch (RuntimeException e) {
                 log.error(
                         "Не удалось снять резерв товара id={}, quantity={}",
                         entry.getKey(),
@@ -159,5 +217,11 @@ public class OrderOrchestrationService {
                 );
             }
         }
+    }
+
+    private record ProductLoadResult(
+            Map<Long, ProductDto> products,
+            boolean degraded
+    ) {
     }
 }
