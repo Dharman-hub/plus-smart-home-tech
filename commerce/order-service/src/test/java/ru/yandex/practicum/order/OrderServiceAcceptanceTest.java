@@ -21,6 +21,7 @@ import ru.yandex.practicum.order.feign.ReserveRequest;
 import ru.yandex.practicum.order.feign.ReserveResponse;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -262,7 +263,7 @@ class OrderServiceAcceptanceTest {
 
     private Map<String, Object> readMap(MvcResult result) throws Exception {
         return json.readValue(
-                result.getResponse().getContentAsString(),
+                result.getResponse().getContentAsString(StandardCharsets.UTF_8),
                 new TypeReference<>() {
                 }
         );
@@ -270,7 +271,7 @@ class OrderServiceAcceptanceTest {
 
     private List<Map<String, Object>> readList(MvcResult result) throws Exception {
         return json.readValue(
-                result.getResponse().getContentAsString(),
+                result.getResponse().getContentAsString(StandardCharsets.UTF_8),
                 new TypeReference<>() {
                 }
         );

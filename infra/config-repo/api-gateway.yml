@@ -112,3 +112,17 @@ eureka:
   client:
     service-url:
       defaultZone: http://localhost:8761/eureka/
+
+app:
+  security:
+    users:
+      - username: ivan
+        password: ivan
+        roles:
+          - USER
+
+      - username: anna
+        password: anna
+        roles:
+          - USER
+          - ADMIN
